@@ -287,7 +287,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🔍 PriceScout</h1>
+            <h1>🔍 PriceCompare</h1>
             <p class="tagline">Find the best deals across the internet</p>
         </header>
 
@@ -301,12 +301,6 @@
                         placeholder="e.g., iPhone 15, Nike Air Max, Johnnie Walker..."
                         required
                     >
-                    <div class="category-pills">
-                        <span class="category-pill active" data-category="all">All Products</span>
-                        <span class="category-pill" data-category="electronics">Electronics</span>
-                        <span class="category-pill" data-category="fashion">Fashion</span>
-                        <span class="category-pill" data-category="liquor">🍷 Liquor</span>
-                    </div>
                 </div>
                 <div class="input-group">
                     <label for="location">Location</label>
@@ -580,8 +574,7 @@ Find product pages on Cheers Nepal website. Return URLs found.`
                     { name: 'Online Liquor Nepal', domain: 'onlineliquornepal.com', local: true },
                     { name: 'DaruMandu', domain: 'darumandu.com', local: true },
                     { name: 'Liquor Nepal', domain: 'liquorsnepal.com', local: true },
-                    { name: 'Liquor land', domain: 'liquorland.com.np', local: true },
-                    { name: 'Barmandoo', domain: 'barmandoo.com.np', local: true }
+                    { name: 'Barmandoo', domain: 'https://barmandoo.com.np/main', local: true }
                 ];
             } else if (isLiquor) {
                 stores = [
