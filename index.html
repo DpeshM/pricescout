@@ -401,10 +401,11 @@
 
         async function searchWithFallback(productName, location, isLiquor) {
             const searchQuery = isLiquor 
-                ? `"${productName}" buy online ${location} liquor wine spirits delivery`
+                ? `"${productName}" site:.${location.toLowerCase()} OR site:.np OR buy online ${location} liquor wine spirits shop delivery`
                 : `"${productName}" buy online shop ${location} price`;
 
             try {
+                // First search for local stores in the location
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -419,11 +420,13 @@
                         }],
                         messages: [{
                             role: 'user',
-                            content: `Search: ${searchQuery}
+                            content: `Search for "${productName}" in ${location}. Query: ${searchQuery}
 
-Find online retailers and list actual product URLs. Return as JSON array: [{"title":"product name from listing","price":"price shown","store":"retailer name","url":"direct product page URL"}]
+Find ALL online stores in ${location} selling this product, especially local stores like Cheers Nepal, SastoDeal, Daraz, etc. Extract actual product page URLs from search results.
 
-Include 8-12 diverse results with real URLs from the search results. Return ONLY the JSON array.`
+Return as JSON: [{"title":"product name","price":"price with currency","store":"store name","url":"direct product URL from search"}]
+
+Include 10-15 results prioritizing local ${location} stores. Return ONLY the JSON array.`
                         }]
                     })
                 });
@@ -455,28 +458,96 @@ Include 8-12 diverse results with real URLs from the search results. Return ONLY
                     const urlPattern = /https?:\/\/[^\s<>"{}|\\^`[\]]+[a-zA-Z0-9\/]/g;
                     const urls = responseText.match(urlPattern) || [];
                     
-                    // Filter for likely product pages
+                    // Filter for likely product pages, prioritize local domains
                     const productUrls = urls.filter(url => 
                         !url.includes('facebook.com') && 
                         !url.includes('twitter.com') &&
                         !url.includes('instagram.com') &&
                         !url.includes('youtube.com')
-                    ).slice(0, 10);
+                    );
 
-                    products = productUrls.map((url, i) => {
+                    // Separate local and international URLs
+                    const localUrls = productUrls.filter(url => 
+                        url.includes('.np') || 
+                        url.toLowerCase().includes('cheers') ||
+                        url.toLowerCase().includes('daraz') ||
+                        url.toLowerCase().includes('sastodeal') ||
+                        url.toLowerCase().includes(location.toLowerCase())
+                    );
+
+                    const internationalUrls = productUrls.filter(url => !localUrls.includes(url));
+
+                    // Prioritize local URLs
+                    const sortedUrls = [...localUrls, ...internationalUrls].slice(0, 12);
+
+                    products = sortedUrls.map((url, i) => {
                         try {
                             const domain = new URL(url).hostname.replace('www.', '');
+                            const isLocal = localUrls.includes(url);
                             return {
                                 title: `${productName}`,
                                 price: 'See price on site',
                                 store: domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1),
                                 url: url,
-                                shipping: 'Check availability'
+                                shipping: isLocal ? `Local ${location} store` : 'Check availability',
+                                isLocal: isLocal
                             };
                         } catch (e) {
                             return null;
                         }
                     }).filter(p => p !== null);
+                }
+
+                // Do a second specific search for Cheers Nepal if it's Nepal and liquor
+                if (isLiquor && location.toLowerCase().includes('nepal') && products.length < 5) {
+                    try {
+                        const cheersResponse = await fetch('https://api.anthropic.com/v1/messages', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                model: 'claude-sonnet-4-20250514',
+                                max_tokens: 1000,
+                                tools: [{
+                                    type: 'web_search_20250305',
+                                    name: 'web_search'
+                                }],
+                                messages: [{
+                                    role: 'user',
+                                    content: `Search: "${productName}" site:cheersnepal.com OR Cheers Nepal liquor
+
+Find product pages on Cheers Nepal website. Return URLs found.`
+                                }]
+                            })
+                        });
+
+                        const cheersData = await cheersResponse.json();
+                        let cheersText = '';
+                        
+                        for (const content of cheersData.content) {
+                            if (content.type === 'text') {
+                                cheersText += content.text;
+                            }
+                        }
+
+                        const cheersUrls = cheersText.match(/https?:\/\/[^\s<>"{}|\\^`[\]]+/g) || [];
+                        const cheersProducts = cheersUrls.filter(url => 
+                            url.includes('cheers') && !url.includes('facebook') && !url.includes('instagram')
+                        ).slice(0, 3).map(url => ({
+                            title: `${productName}`,
+                            price: 'See price on site',
+                            store: 'Cheers Nepal',
+                            url: url,
+                            shipping: 'Local Nepal delivery',
+                            isLocal: true
+                        }));
+
+                        // Add Cheers Nepal products at the beginning
+                        products = [...cheersProducts, ...products];
+                    } catch (e) {
+                        console.log('Cheers Nepal search failed');
+                    }
                 }
 
                 if (products.length > 0) {
@@ -499,30 +570,46 @@ Include 8-12 diverse results with real URLs from the search results. Return ONLY
         }
 
         function generateSampleProducts(productName, location, isLiquor) {
-            const stores = isLiquor 
-                ? [
+            const locationLower = location.toLowerCase();
+            
+            let stores = [];
+            
+            if (isLiquor && locationLower.includes('nepal')) {
+                stores = [
+                    { name: 'Cheers Nepal', domain: 'cheersnepal.com', local: true },
+                    { name: 'Daraz Nepal', domain: 'daraz.com.np', local: true },
+                    { name: 'SastoDeal', domain: 'sastodeal.com', local: true },
+                    { name: 'Drizly', domain: 'drizly.com', local: false },
+                    { name: 'ReserveBar', domain: 'reservebar.com', local: false },
+                    { name: 'Wine.com', domain: 'wine.com', local: false }
+                ];
+            } else if (isLiquor) {
+                stores = [
                     { name: 'Drizly', domain: 'drizly.com', local: false },
                     { name: 'ReserveBar', domain: 'reservebar.com', local: false },
                     { name: 'Total Wine', domain: 'totalwine.com', local: false },
                     { name: 'Wine.com', domain: 'wine.com', local: false },
                     { name: 'Liquor.com Shop', domain: 'shop.liquor.com', local: false },
                     { name: 'Caskers', domain: 'caskers.com', local: false }
-                  ]
-                : [
+                ];
+            } else {
+                stores = [
                     { name: 'Amazon', domain: 'amazon.com', local: true },
                     { name: 'eBay', domain: 'ebay.com', local: true },
                     { name: 'Walmart', domain: 'walmart.com', local: true },
                     { name: 'Best Buy', domain: 'bestbuy.com', local: true },
                     { name: 'Target', domain: 'target.com', local: true },
                     { name: 'Newegg', domain: 'newegg.com', local: true }
-                  ];
+                ];
+            }
 
             return stores.map(store => ({
                 title: `${productName}`,
                 price: 'Check website for price',
                 store: store.name,
                 url: `https://www.${store.domain}/search?q=${encodeURIComponent(productName)}`,
-                shipping: `Available in ${location}`
+                shipping: store.local ? `Local ${location} store` : `Ships to ${location}`,
+                isLocal: store.local
             }));
         }
 
