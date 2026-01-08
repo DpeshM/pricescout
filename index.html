@@ -127,6 +127,15 @@
             100% { transform: rotate(360deg); }
         }
 
+        .location-info {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
         .results-container {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -185,6 +194,12 @@
             margin-bottom: 5px;
         }
 
+        .product-shipping {
+            color: #888;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+
         .product-availability {
             display: inline-block;
             padding: 4px 10px;
@@ -193,6 +208,17 @@
             border-radius: 12px;
             font-size: 0.85em;
             margin-top: 10px;
+        }
+
+        .local-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #ff9800;
+            color: white;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-top: 10px;
+            margin-left: 5px;
         }
 
         .no-results {
@@ -221,7 +247,7 @@
     <div class="container">
         <header>
             <h1>🔍 PriceScout</h1>
-            <p class="tagline">Find the best deals across the internet</p>
+            <p class="tagline">Find the best deals in your location</p>
         </header>
 
         <div class="search-container">
@@ -240,7 +266,7 @@
                     <input 
                         type="text" 
                         id="location" 
-                        placeholder="e.g., New York, USA"
+                        placeholder="e.g., Nepal, India, USA"
                         required
                     >
                 </div>
@@ -248,9 +274,11 @@
             </form>
         </div>
 
+        <div id="locationInfo" class="location-info" style="display: none;"></div>
+
         <div id="loadingContainer" class="loading" style="display: none;">
             <div class="spinner"></div>
-            <p>Searching for the best prices...</p>
+            <p>Searching for the best prices in your location...</p>
         </div>
 
         <div id="resultsContainer" class="results-container"></div>
@@ -265,6 +293,7 @@
         const loadingContainer = document.getElementById('loadingContainer');
         const noResults = document.getElementById('noResults');
         const searchBtn = document.getElementById('searchBtn');
+        const locationInfo = document.getElementById('locationInfo');
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -274,13 +303,15 @@
             
             resultsContainer.innerHTML = '';
             noResults.style.display = 'none';
+            locationInfo.style.display = 'none';
             loadingContainer.style.display = 'block';
             searchBtn.disabled = true;
 
             try {
-                const query = `${productName} price ${location} buy online`;
+                // First search: Find products available in the specified location
+                const locationQuery = `buy ${productName} in ${location} online shopping stores price`;
                 
-                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                const response1 = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -294,15 +325,15 @@
                         }],
                         messages: [{
                             role: 'user',
-                            content: `Search for "${query}" and return ONLY a JSON array of product listings. Each product should have: title, price, store, url, availability. Return at least 6-8 results if available. Format: [{"title":"...","price":"$...","store":"...","url":"https://...","availability":"In Stock"}]. Return ONLY the JSON array, no other text.`
+                            content: `Search for online stores and marketplaces that sell "${productName}" and deliver to or operate in ${location}. Return ONLY a JSON array with format: [{"title":"product name","price":"price in local currency","store":"store name","url":"actual product url","shipping":"ships to ${location}" or "local store","isLocal":true/false}]. Include both local stores and international stores that ship there. Return ONLY the JSON array.`
                         }]
                     })
                 });
 
-                const data = await response.json();
+                const data1 = await response1.json();
                 let productsText = '';
                 
-                for (const content of data.content) {
+                for (const content of data1.content) {
                     if (content.type === 'text') {
                         productsText += content.text;
                     }
@@ -312,49 +343,88 @@
                 let products = [];
                 
                 if (jsonMatch) {
-                    products = JSON.parse(jsonMatch[0]);
-                } else {
-                    products = generateMockProducts(productName, location);
+                    try {
+                        products = JSON.parse(jsonMatch[0]);
+                    } catch (e) {
+                        console.error('JSON parse error:', e);
+                    }
                 }
 
-                displayResults(products);
+                // If no results from AI search, do a second search with different query
+                if (products.length === 0) {
+                    const response2 = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 1000,
+                            tools: [{
+                                type: 'web_search_20250305',
+                                name: 'web_search'
+                            }],
+                            messages: [{
+                                role: 'user',
+                                content: `Find where to buy "${productName}" in ${location}. What are the popular e-commerce sites and stores in ${location}?`
+                            }]
+                        })
+                    });
+
+                    const data2 = await response2.json();
+                    let locationText = '';
+                    
+                    for (const content of data2.content) {
+                        if (content.type === 'text') {
+                            locationText += content.text;
+                        }
+                    }
+
+                    // Show location-specific information
+                    locationInfo.innerHTML = `📍 Searching for ${productName} in ${location}...<br><small>${locationText.substring(0, 200)}...</small>`;
+                    locationInfo.style.display = 'block';
+                }
+
+                // If still no products, show location-aware message
+                if (products.length === 0) {
+                    noResults.innerHTML = `We couldn't find specific listings for "${productName}" available in ${location}. This could mean:<br><br>
+                    • The product may not be widely available in ${location}<br>
+                    • Try searching for local e-commerce sites directly<br>
+                    • Consider international shipping options<br><br>
+                    <small>Popular sites in ${location} may include local marketplaces or international retailers that ship there.</small>`;
+                    noResults.style.display = 'block';
+                } else {
+                    displayResults(products, location);
+                }
                 
             } catch (error) {
                 console.error('Error:', error);
-                const mockProducts = generateMockProducts(productName, location);
-                displayResults(mockProducts);
+                noResults.innerHTML = `Error searching for products. Please try again.`;
+                noResults.style.display = 'block';
             }
 
             loadingContainer.style.display = 'none';
             searchBtn.disabled = false;
         });
 
-        function generateMockProducts(productName, location) {
-            const stores = ['Amazon', 'eBay', 'Walmart', 'Best Buy', 'Target', 'Newegg', 'AliExpress', 'Etsy'];
-            const products = [];
-            
-            for (let i = 0; i < 8; i++) {
-                const basePrice = Math.floor(Math.random() * 500) + 50;
-                const variance = Math.floor(Math.random() * 100) - 50;
-                const price = basePrice + variance;
-                
-                products.push({
-                    title: `${productName} - ${stores[i]} Exclusive`,
-                    price: `$${price.toFixed(2)}`,
-                    store: stores[i],
-                    url: `https://www.${stores[i].toLowerCase().replace(' ', '')}.com/search?q=${encodeURIComponent(productName)}`,
-                    availability: Math.random() > 0.3 ? 'In Stock' : 'Limited Stock'
-                });
-            }
-            
-            return products.sort((a, b) => parseFloat(a.price.slice(1)) - parseFloat(b.price.slice(1)));
-        }
-
-        function displayResults(products) {
+        function displayResults(products, location) {
             if (products.length === 0) {
                 noResults.style.display = 'block';
                 return;
             }
+
+            locationInfo.innerHTML = `📍 Showing ${products.length} results for products available in ${location}`;
+            locationInfo.style.display = 'block';
+
+            // Sort by local stores first, then by price
+            products.sort((a, b) => {
+                if (a.isLocal !== b.isLocal) {
+                    return b.isLocal - a.isLocal;
+                }
+                const priceA = parseFloat(a.price.replace(/[^0-9.]/g, ''));
+                const priceB = parseFloat(b.price.replace(/[^0-9.]/g, ''));
+                return priceA - priceB;
+            });
 
             products.forEach(product => {
                 const card = document.createElement('a');
@@ -367,8 +437,9 @@
                     <div class="product-info">
                         <div class="product-title">${product.title}</div>
                         <div class="product-price">${product.price}</div>
-                        <div class="product-store">📍 ${product.store}</div>
-                        <span class="product-availability">${product.availability}</span>
+                        <div class="product-store">🏪 ${product.store}</div>
+                        <div class="product-shipping">📦 ${product.shipping || 'Check shipping options'}</div>
+                        ${product.isLocal ? '<span class="local-badge">Local Store</span>' : '<span class="product-availability">Ships to ' + location + '</span>'}
                     </div>
                 `;
                 
